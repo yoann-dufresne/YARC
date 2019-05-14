@@ -16,8 +16,10 @@ def parse_arguments():
     parser.add_argument('--length_distribution', '-l', required=True, help="CSV file containing a read length distribution. The columns X and Y must be present where X is the read length and Y the number of reads with this length.")
     parser.add_argument('--depth', '-d', type=int, required=True, help="Sequencing depth. Without subsampling, this sequencing depth is perfect (ie each nucleotide of the ref is present exactly d time in the reads).")
     parser.add_argument('--sub-sample', '-s', type=float, default=1.0, help="Sub-sample ratio. Depending of this ratio, a bigger sequencing depth will be computed. From this bigger pool of reads, the software randomly sub sample to generate an average depth d.")
-    parser.add_argument('--outfile', '-o', help="The file where the reads will be saved. If not specified, outputed on stdout")
+    parser.add_argument('--outprefix', '-o', help="The file prefix where the reads will be saved. If not specified, outputed on stdout (and stderr for paired end)")
     parser.add_argument('--reference', '-r', help="The fasta file containing the reference used to generate reads")
+    parser.add_argument("--paired", "-p", type=bool, default=False, help="If set, generate a pair of read files instead of one. See the gap argument for details on gap size.")
+    parser.add_argument("--gap_distribution", '-g', help="The gap distribution file used for paired end reads. If not set, the gap will be 0.")
     parser.add_argument('--circular', '-c', type=bool, default=False, help="Assume that all the input sequences are circular chromosomes or plasmids.")
     parser.add_argument('--seed', type=int, help="Seed value to initialize the random generator. Used for reproducibility.")
 
@@ -75,7 +77,7 @@ def init_random_generators(len_distrib, seed=None):
     return MetropolisHasting1D(distrib, 10000, seed=random.randint(0, 1000000000))
 
 
-def generate(filename, len_generator, depth, circular=False, subsample_ratio=1, outfile=None):
+def generate(filename, len_generator, depth, paired=False, circular=False, subsample_ratio=1, outprefix=None):
     """ Read the reference fasta file and write the out_file with reads. The lengths are
     randomized using the length generator.
 
@@ -106,19 +108,27 @@ def generate(filename, len_generator, depth, circular=False, subsample_ratio=1, 
     else:
         reader = open(filename)
 
-    # Get the outfile name
     writer = None
-    if not outfile:
-        writer = sys.stdout
+    writer2 = None
+    if not paired:
+        # Get the outfile name
+        if not outprefix:
+            writer = sys.stdout
+        else:
+            writer = open(outprefix + ".fasta", "w")
     else:
-        writer = open(outfile, "w")
+        if not outprefix:
+            writer = sys.stdout
+            writer2 = sys.stderr
+        else:
+            writer = open(outprefix + '_R1.fasta', 'w')
+            writer2 = open(outprefix + '_R2.fasta', 'w')
 
     # split sequences
     random_lengths = []
     read_idx = 0
     for record in SeqIO.parse(reader, "fasta"):
         str_seq = str(record.seq)
-
 
         # Depth
         for d in range(round(full_depth)):
@@ -140,41 +150,62 @@ def generate(filename, len_generator, depth, circular=False, subsample_ratio=1, 
                 if len(random_lengths) == 0:
                     random_lengths = len_generator.next_values(10000)
                     random.shuffle(random_lengths)
-                length = round(random_lengths[0][0])
-                random_lengths = random_lengths[1:]
+                length, _ = random_lengths.pop(0)
+                length = round(length)
+                total_length = length
+                if paired:
+                    total_length = total_length * 2 #TODO : + gap
 
-                # Left or right ?
+                # From left or right ?
                 left = (random.random() <= 0.5)
 
                 origin = split_idx
                 if left:
-                    sequence = str_seq[left_idx:min(right_idx+1, left_idx +length)]
+                    sequence = str_seq[left_idx:min(right_idx+1, left_idx +total_length)]
                     origin += left_idx
-                    left_idx += length
+                    left_idx += total_length
                 else:
-                    sequence = str_seq[max(left_idx, right_idx-length+1):right_idx+1]
-                    origin += max(left_idx, right_idx-length+1)
-                    right_idx -= length
+                    sequence = str_seq[max(left_idx, right_idx-total_length+1):right_idx+1]
+                    origin += max(left_idx, right_idx-total_length+1)
+                    right_idx -= total_length
 
                 origin %= len(str_seq)
-
-                # Reverse complement with 50% chance
-                if random.random() <= 0.5:
-                    sequence = str(Seq(sequence).reverse_complement())
 
                 # sub-sampling
                 if random.random() > subsample_ratio:
                     continue
 
-                # Output the read
-                writer.write(">{}_{};origin={};\n{}\n".format(
-                    record.description, read_idx, origin, sequence))
+                # Reverse complement with 50% chance
+                reversed = False
+                if random.random() <= 0.5:
+                    sequence = str(Seq(sequence).reverse_complement())
+
+                if paired:
+                    # Extract the beginning of the paired sequence
+                    seq_1 = sequence[:min(length, len(sequence))]
+                    # Extract the end of the paired sequence
+                    seq_2 = sequence[max(0, len(sequence)-length):]
+                    seq_2 = str(Seq(seq_2).reverse_complement())
+
+                    # Output the reads
+                    writer.write(">{}_{}_R1;origin={};\n{}\n".format(
+                        record.description, read_idx, origin, seq_1))
+                    # Output the reads
+                    writer2.write(">{}_{}_R2;origin={};\n{}\n".format(
+                        record.description, read_idx, origin, seq_2))
+                else:
+                    # Output the read
+                    writer.write(">{}_{};origin={};\n{}\n".format(
+                        record.description, read_idx, origin, sequence))
+
                 read_idx += 1
 
 
     # Close the outfile if needed
-    if not outfile:
+    if not outprefix:
         writer.close()
+        if paired:
+            writer2.close()
     if not filename:
         reader.close()
 
@@ -184,8 +215,8 @@ def main():
     rnd_gens = init_random_generators(
         args.length_distribution
     )
-    #        filename,       len_generator, depth, subsample_ratio=1, outfile=None
-    generate(args.reference, rnd_gens, args.depth, args.circular, subsample_ratio=args.sub_sample, outfile=args.outfile)
+    #        filename,       len_generator, depth, subsample_ratio=1, outprefix=None
+    generate(args.reference, rnd_gens, args.depth, circular=args.circular, paired=args.paired, subsample_ratio=args.sub_sample, outprefix=args.outprefix)
 
 
 if __name__ == "__main__":
