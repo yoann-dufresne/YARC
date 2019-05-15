@@ -18,9 +18,9 @@ def parse_arguments():
     parser.add_argument('--sub-sample', '-s', type=float, default=1.0, help="Sub-sample ratio. Depending of this ratio, a bigger sequencing depth will be computed. From this bigger pool of reads, the software randomly sub sample to generate an average depth d.")
     parser.add_argument('--outprefix', '-o', help="The file prefix where the reads will be saved. If not specified, outputed on stdout (and stderr for paired end)")
     parser.add_argument('--reference', '-r', help="The fasta file containing the reference used to generate reads")
-    parser.add_argument("--paired", "-p", type=bool, default=False, help="If set, generate a pair of read files instead of one. See the gap argument for details on gap size.")
+    parser.add_argument("--paired", "-p", action='store_true', help="If set, generate a pair of read files instead of one. See the gap argument for details on gap size.")
     parser.add_argument("--gap_distribution", '-g', help="The gap distribution file used for paired end reads. If not set, the gap will be 0.")
-    parser.add_argument('--circular', '-c', type=bool, default=False, help="Assume that all the input sequences are circular chromosomes or plasmids.")
+    parser.add_argument('--circular', '-c', action='store_true', help="Assume that all the input sequences are circular chromosomes or plasmids.")
     parser.add_argument('--seed', type=int, help="Seed value to initialize the random generator. Used for reproducibility.")
 
     args = parser.parse_args()
@@ -98,6 +98,7 @@ def generate(filename, len_generator, depth, paired=False, circular=False, subsa
 
     Return: None
     """
+    print("TODO: Fix problem with floating point depth", file=sys.stderr)
 
     full_depth = depth / subsample_ratio
 
