@@ -4,6 +4,7 @@ import sys
 import argparse
 import csv
 import random
+from math import ceil
 
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -12,7 +13,7 @@ from metropolis_hasting import MetropolisHasting1D
 
 def parse_arguments():
     # Parse the command line
-    parser = argparse.ArgumentParser(description="Process a reads FASTA file to integrate errors based on a PacBio model")
+    parser = argparse.ArgumentParser(description="Create reads from a fasta file reagarding a length distribution and a coverage.")
     parser.add_argument('--length_distribution', '-l', required=True, help="CSV file containing a read length distribution. The columns X and Y must be present where X is the read length and Y the number of reads with this length.")
     parser.add_argument('--depth', '-d', type=int, required=True, help="Sequencing depth. Without subsampling, this sequencing depth is perfect (ie each nucleotide of the ref is present exactly d time in the reads).")
     parser.add_argument('--sub-sample', '-s', type=float, default=1.0, help="Sub-sample ratio. Depending of this ratio, a bigger sequencing depth will be computed. From this bigger pool of reads, the software randomly sub sample to generate an average depth d.")
@@ -98,7 +99,7 @@ def generate(filename, len_generator, depth, paired=False, circular=False, subsa
 
     Return: None
     """
-    print("TODO: Fix problem with floating point depth", file=sys.stderr)
+    # print("TODO: Fix problem with floating point depth", file=sys.stderr)
 
     full_depth = depth / subsample_ratio
 
@@ -132,7 +133,7 @@ def generate(filename, len_generator, depth, paired=False, circular=False, subsa
         str_seq = str(record.seq)
 
         # Depth
-        for d in range(round(full_depth)):
+        for d in range(ceil(full_depth)):
             # Circular to linear part
             split_idx = 0
             if circular:
@@ -146,7 +147,7 @@ def generate(filename, len_generator, depth, paired=False, circular=False, subsa
             right_idx = len(str_seq)
 
             # Make reads from left and right
-            while left_idx <= right_idx:
+            while left_idx < right_idx:
                 # Length computation
                 if len(random_lengths) == 0:
                     random_lengths = len_generator.next_values(10000)
@@ -172,8 +173,16 @@ def generate(filename, len_generator, depth, paired=False, circular=False, subsa
 
                 origin %= len(str_seq)
 
+                # Length problem
+                if len(sequence) < total_length:
+                    continue
+
                 # sub-sampling
                 if random.random() > subsample_ratio:
+                    continue
+
+                # Floating point coverage
+                if d == 0 and random.random() > (full_depth%1):
                     continue
 
                 # Reverse complement with 50% chance
