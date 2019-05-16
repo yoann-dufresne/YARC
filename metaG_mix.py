@@ -11,9 +11,10 @@ import reads_generator
 
 def parse_arguments():
     # Parse the command line
-    parser = argparse.ArgumentParser(description="Use a bunch of fasta file to create a metagenomic synthetic sample.")
+    parser = argparse.ArgumentParser(description="Use a bunch of fasta file to create a metagenomic synthetic sample based on a lognorm distribution.")
     parser.add_argument('--genome_directory', '-d', required=True, help="A directory containing fasta files that will be used for the sample creation.")
     parser.add_argument('--num_genomes', '-n', type=int, required=True, help="Number of genomes that must be includded")
+    parser.add_argument('--threads', '-t', type=int, default=4, help="The number of thred used to compute reads.")
     parser.add_argument('--coverage', '-c', type=int, required=True, help="Average coverage.")
     parser.add_argument('--outdir', '-o', default='.', help="Output directory")
     parser.add_argument('--seed', '-s', type=int, help="The random seed (use it only for reproducibility purpose).")
@@ -45,7 +46,7 @@ def parse_arguments():
     if args.seed:
         random.seed(args.seed)
 
-    print("TODO: add threading support", file=sys.stderr)
+    # print("TODO: add threading support", file=sys.stderr)
 
     return args
 
@@ -92,7 +93,7 @@ def create_mix(files):
 from datetime import datetime
 def create_out_tree(outdir):
     # Create output directory tree
-    sample_dir = outdir + '/' + "_".join(str(datetime.now()).split())
+    sample_dir = outdir + '/' + str(datetime.now()).replace(' ', '_').replace(':', '_')
     os.mkdir(sample_dir)
     shutil.move(outdir + '/abundances.csv', sample_dir + '/abundances.csv')
     out_gen_dir = sample_dir + '/genomes'
@@ -103,17 +104,10 @@ def create_out_tree(outdir):
     return sample_dir
 
 
-def create_sequences(abundances, gen_dir, len_dist, sample_dir):
-    """ Create one read file for each selected genome regarding the abundance in the sample.
-        The used genomes will be copied into a genome folder into the sample directory.
-        The reads will be copied into a reads folder.
-        @args abundances A dictionary associating genomes to abundances
-        @args gen_dir The directory containing the genome fasta files
-        @args len_dist A read length distribution must be provided. See reads_generator for more details.
-        @args sample_dir The directory where everything will be outputed.
-    """
-    # Sampling
-    for genome, abundance in abundances.items():
+from multiprocessing import Pool
+# Function only needed for parallelism
+def genome_reads_compute(args):
+        genome, abundance, gen_dir, len_dist, sample_dir = args
         # Copy the complete genome
         shutil.copy(f"{gen_dir}/{genome}", f"{sample_dir}/genomes/{genome}")
 
@@ -127,6 +121,22 @@ def create_sequences(abundances, gen_dir, len_dist, sample_dir):
             subsample_ratio=0.5,
             outprefix=f"{sample_dir}/reads/{'.'.join(genome.split('.')[:-1])}"
         )
+def create_sequences_parallel(abundances, gen_dir, len_dist, sample_dir, threads=4):
+    """ Create one read file for each selected genome regarding the abundance in the sample.
+        The used genomes will be copied into a genome folder into the sample directory.
+        The reads will be copied into a reads folder.
+        @args abundances A dictionary associating genomes to abundances
+        @args gen_dir The directory containing the genome fasta files
+        @args len_dist A read length distribution must be provided. See reads_generator for more details.
+        @args sample_dir The directory where everything will be outputed.
+    """
+    def gen_args():
+        for genome, abundance in abundances.items():
+            yield (genome, abundance, gen_dir, len_dist, sample_dir)
+
+    with Pool(processes=threads)as pool:
+        pool.map(genome_reads_compute, gen_args())
+
 
 
 def pull_files(files, sample_dir):
@@ -165,7 +175,7 @@ def main():
 
     print("3 - Create reads", file=sys.stderr)
     sample_dir = create_out_tree(args.outdir)
-    create_sequences(abundances, args.genome_directory, args.length_distribution, sample_dir)
+    create_sequences_parallel(abundances, args.genome_directory, args.length_distribution, sample_dir, threads=args.threads)
 
     print("4 - Pull reads together", file=sys.stderr)
     pull_files(files, sample_dir)
