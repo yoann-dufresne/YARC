@@ -1,7 +1,7 @@
 import argparse
 import os
 from multiprocessing import Pool
-
+from itertools import combinations, product
 
 def parse_args():
     parser = argparse.ArgumentParser(description='ANI all vs all computation')
@@ -15,6 +15,8 @@ def parse_args():
 
 def parse_list(file):
     root = "/".join(file.split("/")[:-1])
+    if len(root) == 0:
+        root = "."
     files = []
     with open(file) as f:
         for line in f:
@@ -53,10 +55,10 @@ def main():
     f_lst = parse_list(args.genome_list)
     pairs = []
     if args.queries is None:
-        compute_parallel_ani(combinations(f_lst,2), args.cores)
+        compute_parallel_ani(list(combinations(f_lst,2)), args.cores)
     else:
         q_lst = parse_list(args.queries)
-        compute_parallel_ani(product(f_lst, q_lst), args.cores)
+        compute_parallel_ani(list(product(f_lst, q_lst)), args.cores)
 
 
 if __name__ == "__main__":
